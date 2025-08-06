@@ -1,2 +1,3 @@
-# VEXU-ITICs
-Vex-U Robotics v5 Competition - Car's source codes
+# VEX-TIC-s
+Repository for VEX-Robotics programming 
+- Soy jose
