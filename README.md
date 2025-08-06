@@ -1,4 +1,4 @@
 # VEX-TIC-s
 Repository for VEX-Robotics programming 
 
-- You can use them, but you aldo need copy 'nd paste the codes, because isnt in the correct extencion, b4 i was updating the src codes.
+- You can use them, but you aldo need copy 'nd paste the codes, because isnt in the correct extencion, b4 i was updating the src codes. At the same time the compilated codes are with the extencion `.v5pyton`
