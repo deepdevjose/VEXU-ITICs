@@ -46,23 +46,6 @@ motor_cepillo = Motor(Ports.PORT8, False)
 # ------------------------------------------------
 DEADZONE = 10  # Ignorar ruido pequeño en joystick
 
-# ------------------------------------------------
-# Semilla aleatoria con voltaje, corriente y timer
-# ------------------------------------------------
-def initializeRandomSeed():
-    """
-    Inicializa semilla de números aleatorios usando valores de batería y tiempo.
-    """
-    wait(100, MSEC)
-    random = (
-        brain.battery.voltage(MV)
-        + brain.battery.current(CurrentUnits.AMP) * 100
-        + brain.timer.system_high_res()
-    )
-    urandom.seed(int(random))
-
-initializeRandomSeed()
-
 # ================================================================
 # Funciones de Movimiento (Tren motriz)
 # ================================================================
