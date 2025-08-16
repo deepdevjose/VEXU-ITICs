@@ -26,7 +26,6 @@
 # ================================================================
 
 from vex import *
-import urandom
 
 # ------------------------------------------------
 # Inicialización del cerebro y controlador
