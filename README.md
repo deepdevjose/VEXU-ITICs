@@ -1,4 +1,7 @@
 # VEX-TIC-s
-Repository for VEX-Robotics programming 
 
-- You can use them, but you aldo need copy 'nd paste the codes, because isnt in the correct extencion, b4 i was updating the src codes. At the same time the compilated codes are with the extencion `.v5pyton`
+---
+
+Just a repo with some VEX Robotics code 🤖
+Yeah, you can totally use them, but you’ll need to copy & paste the code since the files aren’t in the right extension :)
+I used to keep the src files updated, but now the compiled ones ended up with the .v5pyton extension (btw, the .v5pyton extension is just VEX being VEX, idk why)
