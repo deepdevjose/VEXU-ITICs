@@ -45,6 +45,14 @@ DEADZONE = 10  # Umbral para ignorar pequeños valores del joystick (ruido)
 # Motores del tren motriz (mecanum)
 #   Ajusta el tercer parámetro (invertido) si tu robot se mueve al revés.
 # ------------------------------------------------
+
+# Relacion de colores en motores del tren motriZ
+# Define la relación de engranajes interna del cartucho que tenga el motor.
+# Los motores VEX tienen cartuchos intercambiables con diferentes colores:
+# 36:1 (torque, rojo) → más fuerza, menos velocidad.
+# 18:1 (standard, verde) → balance entre fuerza y velocidad.
+# 6:1 (speed, azul) → más velocidad, menos fuerza.
+
 motor_back_left   = Motor(Ports.PORT12, GearSetting.RATIO_18_1, True)   # Izquierdo trasero
 motor_back_right  = Motor(Ports.PORT2,  GearSetting.RATIO_18_1, False)  # Derecho trasero
 motor_front_left  = Motor(Ports.PORT1,  GearSetting.RATIO_18_1, False)  # Izquierdo delantero
@@ -278,7 +286,7 @@ def main() -> None:
         elif controller.buttonRight.pressing():
             girarc_derecha(50)
 
-        # Pequeña pausa para estabilidad
+        # Pequeña pausa para estabilidad y evitar saturación de CPU
         wait(20, MSEC)
 
 # ------------------------------------------------
