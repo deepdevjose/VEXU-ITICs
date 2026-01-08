@@ -1,0 +1,18 @@
+{
+	"extension": {
+		"version": "0.7.2025041600",
+		"json": 2
+	},
+	"project": {
+		"name": "Autonomo_Chico",
+		"description": "Autonomous Mode for VEX ",
+		"creationDate": "11/18/2025, 1:20:52 PM",
+		"platform": "V5",
+		"language": "python",
+		"slot": 2,
+		"sdkVersion": "V5_1_0_1_25",
+		"python": {
+			"main": "src/main.py"
+		}
+	}
+}
