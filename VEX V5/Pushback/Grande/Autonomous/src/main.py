@@ -1,468 +1,459 @@
 # ================================================================
-# VEXcode – Modo Autónomo SIMPLE con Odometría
+# VEXcode – Modo Autónomo VEX Grande (PushBack)
 # ---------------------------------------------------------------
-# Rutina básica con métodos simples para movimiento
-# Usa odometría para navegación punto a punto
-#
-# Hardware:
-#   - Drivetrain: motores puertos 3 y 4 (36:1)
-#   - Ruedas: 2.75" diámetro
-#   - Inertial: puerto 6
-#   - Intake: puertos 20 y 11 (6:1)
-#   - Cañón: puerto 16 (18:1)
-#   - Pistones: 3-wire A (descore), B (trasero)
+# Descripción:
+#   Reutiliza la configuración de motores del código teleoperado.
 #
 # Autor: @deepdevjose
 # ================================================================
 
 from vex import *
-import math
+import time
 
 # ------------------------------------------------
-# Hardware
+# Inicialización del cerebro y controlador
 # ------------------------------------------------
 brain = Brain()
 controller = Controller()
 
-# Motores drivetrain
-motor_left = Motor(Ports.PORT3, GearSetting.RATIO_36_1, True)
-motor_right = Motor(Ports.PORT4, GearSetting.RATIO_36_1, False)
+# ------------------------------------------------
+# CONFIGURACIÓN DE PUERTOS Y RATIOS
+# ------------------------------------------------
+# Tren motriz (rojos 36:1)
+DRIVE_LEFT_PORT   = Ports.PORT3
+DRIVE_RIGHT_PORT  = Ports.PORT4
 
-# Sensor inertial
-imu = Inertial(Ports.PORT6)
+# Intake (azul 6:1)
+INTAKE_PORT = Ports.PORT20
+INTAKE_SUP_PORT = Ports.PORT11
 
-# Mecanismos
-intake = Motor(Ports.PORT20, GearSetting.RATIO_6_1, False)
-intake_sup = Motor(Ports.PORT11, GearSetting.RATIO_6_1, True)
-cannon = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
+# Cañón (verde 18:1)
+CANNON_PORT = Ports.PORT16
+WAY_PORT = Ports.PORT16
+
+# Sensor óptico
+OPTICAL_SENSOR_PORT = Ports.PORT19
+
+# ------------------------------------------------
+# PARÁMETROS DE TUNING (ajustar en campo)
+# ------------------------------------------------
+# Loop timing
+LOOP_TIME_MS = 20
+
+# Deadzone por eje
+DEADZONE_FWD = 5
+DEADZONE_TURN = 8
+
+# Curva exponencial (0.0=lineal, 0.5=balanceado, 1.0=cúbico)
+EXPO_FWD = 0.5
+EXPO_TURN = 0.4
+
+# Slew rate (% cambio por ciclo de 20ms)
+SLEW_DRIVE = 8      # ~250ms para 0→100%
+SLEW_BRUSH = 25     # Más rápido para brushes
+SLEW_CANNON = 25
+SLEW_WAY = 25       # Independiente para tuning
+
+# Modo de frenado drivetrain
+DRIVE_BRAKE_MODE = BrakeType.COAST
+
+# Cooldown al soltar R1/L1 (ms sin aplicar toggles)
+OVERRIDE_COOLDOWN_MS = 80  # Reducido para evitar "lag" perceptible
+
+# Rangos de colores para sensor óptico estos estan en HUE
+COLOR_RED_MIN = 3
+COLOR_RED_MAX = 17
+COLOR_BLUE_MIN = 148
+COLOR_BLUE_MAX = 215
+
+# ------------------------------------------------
+# Parametros de odometria 2D
+# ------------------------------------------------
+# Medidas de las llantas para odometría, estas las medi a mano con un flexometro
+WHEEL_DIAMETER_CM = 10.0       # Diámetro de la llanta: 10cm
+WHEEL_TRAVEL_CM = 33.5         # 1 vuelta completa = 33.5cm recorridos
+WHEEL_DEGREES = 364.0          # 1 vuelta completa = 285 grados en encoder, uno pensaria que siempre sera 360 grados.
+
+# Conversión: grados por centímetro
+DEGREES_PER_CM = WHEEL_DEGREES / WHEEL_TRAVEL_CM  # 285/64 = 4.453125 grados/cm
+
+# ------------------------------------------------
+# Instancias de motores
+# ------------------------------------------------
+# Drivetrain: reversed en constructor según montaje físico
+motor_left  = Motor(DRIVE_LEFT_PORT,  GearSetting.RATIO_36_1, False)
+motor_right = Motor(DRIVE_RIGHT_PORT, GearSetting.RATIO_36_1, True)
+
+
+# Cannon/WAY: ajustar reversed para que FORWARD=disparar, REVERSE=unjam
+# Si el comportamiento no coincide, invertir aquí en vez de en el código
+intake = Motor(INTAKE_PORT, GearSetting.RATIO_6_1, False)
+intake_sup = Motor(INTAKE_SUP_PORT, GearSetting.RATIO_6_1, True)
+
+cannon = Motor(CANNON_PORT, GearSetting.RATIO_18_1, False)
 
 # Pistones neumáticos
 piston_trasero = DigitalOut(brain.three_wire_port.a)
 piston_descores = DigitalOut(brain.three_wire_port.b)
 
-# ------------------------------------------------
-# PARÁMETROS
-# ------------------------------------------------
-WHEEL_DIAMETER = 4  # pulgadas
-WHEEL_CIRCUMFERENCE = WHEEL_DIAMETER * math.pi
-TRACK_WIDTH = 15  # pulgadas (distancia entre ruedas)
+# Sensor óptico, este detecta tambien colores ademas de parametros de distancia como cerca, lejos etc.
+optical_sensor = Optical(OPTICAL_SENSOR_PORT)
 
-# Odometría
-ODOM_UPDATE_MS = 10
-odom = {
-    "x": 0.0,
-    "y": 0.0,
-    "theta": 0.0,
-    "last_left": 0.0,
-    "last_right": 0.0,
-    "running": False
-}
+# Variable global para selección de equipo, asi me evito hacer dos codigos, solo hago una desicion.
+# True = Equipo Rojo, False = Equipo Azul
+team_is_red = True
 
-# Tolerancias
-DISTANCE_TOLERANCE = 1.5  # pulgadas
-ANGLE_TOLERANCE = 3.0  # grados
+# Modos de frenado
+for m in (motor_left, motor_right, intake, intake_sup, cannon):
+    m.set_stopping(DRIVE_BRAKE_MODE)
 
-# Control
-KP_LINEAR = 3.5
-MAX_LINEAR_SPEED = 70
-KP_ANGULAR = 2.0
-MAX_ANGULAR_SPEED = 50
-MIN_SPEED = 10
+# ================================================================
+# Funciones de Detección de Colores
+# ================================================================
+def is_red_detected() -> bool:
+    """Verifica si el sensor detecta color rojo."""
+    hue = optical_sensor.hue()
+    return COLOR_RED_MIN <= hue <= COLOR_RED_MAX
 
-# ------------------------------------------------
-# Utilidades
-# ------------------------------------------------
-def clamp(value, min_val, max_val):
-    return max(min_val, min(max_val, value))
+def is_blue_detected() -> bool:
+    """Verifica si el sensor detecta color azul."""
+    hue = optical_sensor.hue()
+    return COLOR_BLUE_MIN <= hue <= COLOR_BLUE_MAX
 
-def normalize_angle(angle):
-    """Normaliza ángulo a [-180, 180]"""
-    while angle > 180:
-        angle -= 360
-    while angle < -180:
-        angle += 360
-    return angle
+def is_object_near() -> bool:
+    """Verifica si hay un objeto cerca usando proximidad del sensor."""
+    # Proximity devuelve un valor 0-100%, consideramos 'near' > 50%
+    return optical_sensor.is_near_object()
 
-def heading_error_deg(target, current):
-    """Calcula error angular shortest path (0-360 a [-180, 180])"""
-    err = (target - current + 540) % 360 - 180
-    return err
-
-def encoder_to_inches(degrees):
-    rotations = degrees / 360.0
-    return rotations * WHEEL_CIRCUMFERENCE
-
-def distance_to(x, y):
-    dx = x - odom["x"]
-    dy = y - odom["y"]
-    return math.sqrt(dx * dx + dy * dy)
-
-# ================================================
-# CALIBRACIÓN E INICIALIZACIÓN
-# ================================================
-def calibrate():
-    """Calibra el IMU y resetea odometría"""
+def select_team() -> None:
+    """
+    Permite seleccionar el equipo al inicio del programa usando el controlador.
+    Presiona ButtonUp (arriba) para Rojo, ButtonDown (abajo) para Azul.
+    """
+    global team_is_red
+    
     brain.screen.clear_screen()
     brain.screen.set_cursor(1, 1)
-    brain.screen.print("Calibrando IMU...")
+    brain.screen.print("=== SELECTOR DE EQUIPO ===")
+    brain.screen.set_cursor(3, 1)
+    brain.screen.print("Controller UP: ROJO")
+    brain.screen.set_cursor(4, 1)
+    brain.screen.print("Controller DOWN: AZUL")
+    brain.screen.set_cursor(6, 1)
+    brain.screen.print("Esperando seleccion...")
     
-    imu.calibrate()
-    while imu.is_calibrating():
-        wait(50, MSEC)
-    
-    motor_left.set_position(0, DEGREES)
-    motor_right.set_position(0, DEGREES)
-    
-    odom["x"] = 0.0
-    odom["y"] = 0.0
-    odom["theta"] = 0.0
-    odom["last_left"] = 0.0
-    odom["last_right"] = 0.0
-    
-    brain.screen.set_cursor(2, 1)
-    brain.screen.print("Listo!")
-    wait(500, MSEC)
+    # Esperar hasta que presionen un botón del controlador
+    while True:
+        if controller.buttonUp.pressing():
+            team_is_red = True
+            brain.screen.set_cursor(8, 1)
+            brain.screen.print(">>> EQUIPO ROJO <<<")
+            controller.screen.clear_screen()
+            controller.screen.set_cursor(1, 1)
+            controller.screen.print("EQUIPO: ROJO")
+            wait(1, SECONDS)
+            break
+        elif controller.buttonDown.pressing():
+            team_is_red = False
+            brain.screen.set_cursor(8, 1)
+            brain.screen.print(">>> EQUIPO AZUL <<<")
+            controller.screen.clear_screen()
+            controller.screen.set_cursor(1, 1)
+            controller.screen.print("EQUIPO: AZUL")
+            wait(1, SECONDS)
+            break
+        wait(0.1, SECONDS)
 
-def set_position(x=0.0, y=0.0, theta=0.0):
-    """Establece posición inicial manualmente"""
-    odom["x"] = x
-    odom["y"] = y
-    odom["theta"] = theta
-
-# ================================================
-# ODOMETRÍA (Loop en paralelo)
-# ================================================
-def odometry_loop():
-    """Loop de odometría que actualiza posición continuamente"""
-    odom["running"] = True
-    
-    while odom["running"]:
-        # Leer encoders
-        left_pos = motor_left.position(DEGREES)
-        right_pos = motor_right.position(DEGREES)
-        
-        # Calcular deltas
-        delta_left = encoder_to_inches(left_pos - odom["last_left"])
-        delta_right = encoder_to_inches(right_pos - odom["last_right"])
-        
-        # Avance promedio
-        delta_s = (delta_left + delta_right) / 2.0
-        
-        # Leer orientación del IMU
-        theta_deg = imu.heading()
-        if theta_deg > 180:
-            theta_deg -= 360
-        odom["theta"] = theta_deg
-        
-        # Actualizar posición global
-        theta_rad = math.radians(theta_deg)
-        odom["x"] += delta_s * math.cos(theta_rad)
-        odom["y"] += delta_s * math.sin(theta_rad)
-        
-        # Guardar para próximo ciclo
-        odom["last_left"] = left_pos
-        odom["last_right"] = right_pos
-        
-        wait(ODOM_UPDATE_MS, MSEC)
-
-def start_odometry():
-    """Inicia el loop de odometría en paralelo"""
-    Thread(odometry_loop)
-
-def stop_odometry():
-    """Detiene el loop de odometría"""
-    odom["running"] = False
-
-# ================================================
-# MOVIMIENTOS BÁSICOS CON ODOMETRÍA
-# ================================================
-def drive_to(x, y, timeout_ms=5000):
-    """Ir a un punto (x, y) usando odometría
+# ================================================================
+# Funciones de Movimiento Autónomo con Odometría
+# ================================================================
+def drive_distance_cm(distance_cm: float, velocity: int = 50) -> None:
+    """
+    Mueve el robot una distancia específica en centímetros usando odometría.
     
     Args:
-        x: coordenada X en pulgadas
-        y: coordenada Y en pulgadas
-        timeout_ms: tiempo máximo (default 5s)
-    
-    Returns:
-        True si llegó, False si timeout
+        distance_cm: Distancia a recorrer en centímetros (+ adelante, - atrás)
+        velocity: Velocidad del movimiento (0-100%), por defecto 50%
     """
-    start_time = brain.timer.time(MSEC)
+    # Calcular grados necesarios para la distancia deseada
+    degrees_to_turn = distance_cm * DEGREES_PER_CM
     
-    while True:
-        # Timeout
-        if brain.timer.time(MSEC) - start_time > timeout_ms:
-            motor_left.stop()
-            motor_right.stop()
-            return False
-        
-        # Verificar llegada
-        dist = distance_to(x, y)
-        if dist <= DISTANCE_TOLERANCE:
-            motor_left.stop()
-            motor_right.stop()
-            return True
-        
-        # Calcular ángulo objetivo
-        dx = x - odom["x"]
-        dy = y - odom["y"]
-        target_angle = math.degrees(math.atan2(dy, dx))
-        angle_error = normalize_angle(target_angle - odom["theta"])
-        
-        # Control lineal (proporcional a distancia)
-        linear = KP_LINEAR * dist
-        linear = clamp(linear, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED)
-        
-        # Control angular (corrección de rumbo)
-        angular = KP_ANGULAR * angle_error
-        angular = clamp(angular, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED)
-        
-        # Mezcla arcade
-        left_power = linear + angular
-        right_power = linear - angular
-        
-        left_power = clamp(left_power, -100, 100)
-        right_power = clamp(right_power, -100, 100)
-        
-        # Aplicar
-        motor_left.spin(FORWARD, left_power, PERCENT)
-        motor_right.spin(FORWARD, right_power, PERCENT)
-        
-        wait(20, MSEC)
-
-def forward(inches, timeout_ms=5000):
-    """Avanza recto una distancia (relativo a posición actual)"""
-    theta_rad = math.radians(odom["theta"])
-    target_x = odom["x"] + inches * math.cos(theta_rad)
-    target_y = odom["y"] + inches * math.sin(theta_rad)
-    return drive_to(target_x, target_y, timeout_ms)
-
-def backward(inches, timeout_ms=5000):
-    """Retrocede una distancia"""
-    return forward(-inches, timeout_ms)
-
-def turn_left(degrees, timeout_ms=3000):
-    """Gira a la izquierda (relativo) usando IMU + encoders para precisión"""
-    start_heading = imu.heading()
-    start_left = motor_left.position(DEGREES)
-    start_right = motor_right.position(DEGREES)
+    # Resetear encoders antes del movimiento
+    motor_left.reset_position()
+    motor_right.reset_position()
     
-    settle_count = 0
-    settle_required = 10  # Más ciclos para confirmar estabilidad
+    # Determinar dirección
+    direction = FORWARD if distance_cm > 0 else REVERSE
+    degrees_abs = abs(degrees_to_turn)
     
-    start_time = brain.timer.time(MSEC)
+    # Mover ambos motores la distancia calculada
+    motor_left.spin_for(direction, degrees_abs, DEGREES, velocity, PERCENT, False)
+    motor_right.spin_for(direction, degrees_abs, DEGREES, velocity, PERCENT, True)
+
+def drive_forward(velocity: int, duration: float) -> None:
+    """Mueve el robot hacia adelante por tiempo (legacy)."""
+    motor_left.spin(FORWARD, velocity, PERCENT)
+    motor_right.spin(FORWARD, velocity, PERCENT)
+    wait(duration, SECONDS)
+    motor_left.stop()
+    motor_right.stop()
+
+def drive_backward(velocity: int, duration: float) -> None:
+    """Mueve el robot hacia atrás por tiempo (legacy)."""
+    motor_left.spin(REVERSE, velocity, PERCENT)
+    motor_right.spin(REVERSE, velocity, PERCENT)
+    wait(duration, SECONDS)
+    motor_left.stop()
+    motor_right.stop()
+
+def turn_left_degrees(degrees: float, velocity: int) -> None:
+    """Gira el robot a la izquierda."""
+    duration = degrees / 100.0
+    motor_left.spin(REVERSE, velocity, PERCENT)
+    motor_right.spin(FORWARD, velocity, PERCENT)
+    wait(duration, SECONDS)
+    motor_left.stop()
+    motor_right.stop()
+
+def turn_right_degrees(degrees: float, velocity: int) -> None:
+    """Gira el robot a la derecha."""
+    duration = abs(degrees) / 100.0
+    motor_left.spin(FORWARD, velocity, PERCENT)
+    motor_right.spin(REVERSE, velocity, PERCENT)
+    wait(duration, SECONDS)
+    motor_left.stop()
+    motor_right.stop()
+
+def turn_left_pivot_90(velocity: int = 50) -> None:
+    """
+    Gira 90 grados a la izquierda pivotando sobre la llanta izquierda.
+    La llanta izquierda permanece frenada mientras la derecha avanza 25cm.
+    Luego la izquierda retrocede 5cm mientras la derecha está frenada.
+    """
+    # Distancia que debe recorrer la llanta derecha para girar 90 grados
+    pivot_distance_cm = 20.0
+    degrees_to_turn = pivot_distance_cm * DEGREES_PER_CM  # 50 * 4.453125 = 222.65625 grados
     
-    while settle_count < settle_required:
-        # Timeout
-        if brain.timer.time(MSEC) - start_time > timeout_ms:
-            motor_left.stop(BRAKE)
-            motor_right.stop(BRAKE)
-            return False
-        
-        # Leer IMU - fuente principal de verdad
-        current = imu.heading()
-        rotation_done = heading_error_deg(current, start_heading)
-        
-        # Error restante basado en IMU
-        err = degrees - rotation_done
-        
-        # Tolerancia adaptativa - muy estricta
-        current_tolerance = 2.5 if abs(err) < 15 else 3.5
-        
-        # Verificar settling (debe estar estable)
-        if abs(err) <= current_tolerance:
-            settle_count += 1
-            # En settling, no mover motores
-            motor_left.stop(BRAKE)
-            motor_right.stop(BRAKE)
-            wait(20, MSEC)
-            continue
-        else:
-            settle_count = 0
-        
-        # Control MUY conservador con zonas
-        if abs(err) > 25:
-            # Zona rápida
-            turn = err * 0.3
-            turn = clamp(turn, -25, 25)
-        elif abs(err) > 15:
-            # Zona media
-            turn = err * 0.25
-            turn = clamp(turn, -15, 15)
-        elif abs(err) > 8:
-            # Zona lenta
-            turn = err * 0.2
-            turn = clamp(turn, -10, 10)
-        else:
-            # Zona muy lenta
-            turn = err * 0.15
-            turn = clamp(turn, -8, 8)
-        
-        # Velocidad mínima solo si error es significativo
-        if abs(err) > 6 and abs(turn) > 0 and abs(turn) < 5:
-            turn = 5 if turn > 0 else -5
-        elif abs(turn) < 3 and abs(err) > 0:
-            # Muy cerca, movimientos mínimos
-            turn = 3 if err > 0 else -3
-        
-        motor_left.spin(FORWARD, -turn, PERCENT)
-        motor_right.spin(FORWARD, turn, PERCENT)
-        wait(20, MSEC)
+    # PASO 1: Resetear encoder de la llanta derecha para empezar en 0
+    motor_right.reset_position()
     
-    # Detener con freno fuerte
-    motor_left.stop(BRAKE)
-    motor_right.stop(BRAKE)
-    wait(100, MSEC)  # Esperar que se asiente completamente
+    # PASO 2: Frenar la llanta izquierda (aplicar brake como pivote)
+    motor_left.stop(BrakeType.BRAKE)
     
-    # Mostrar telemetría del giro
-    final_heading = imu.heading()
-    actual_rotation = heading_error_deg(final_heading, start_heading)
-    brain.screen.set_cursor(3, 1)
-    brain.screen.print("Giro: {}° -> {}°    ".format(int(degrees), int(actual_rotation)))
+    # PASO 3: Mover solo la llanta derecha hacia adelante
+    motor_right.spin_for(FORWARD, degrees_to_turn, DEGREES, velocity, PERCENT, True)
     
-    return True
+    # PASO 4: Frenar la llanta derecha y preparar la izquierda
+    motor_right.stop(BrakeType.BRAKE)
+    motor_left.reset_position()
+    
+    # PASO 5: Retroceder la llanta izquierda 5cm mientras la derecha está frenada
+    # Como motor_left tiene reversed=True, usamos FORWARD para retroceder físicamente
+    back_distance_cm = 15.5
+    back_degrees = back_distance_cm * DEGREES_PER_CM
+    motor_left.spin_for(REVERSE, back_degrees, DEGREES, velocity, PERCENT)
+    
+    # PASO 6: Frenar ambas llantas al terminar
+    motor_left.stop(BrakeType.BRAKE)
+    motor_right.stop(BrakeType.BRAKE)
 
-def turn_right(degrees, timeout_ms=3000):
-    """Gira a la derecha (relativo)"""
-    return turn_left(-degrees, timeout_ms)
 
-def turn_to_angle(target_angle, timeout_ms=3000):
-    """Gira a un ángulo absoluto específico (0-360)"""
-    start_heading = imu.heading()
-    angle_diff = heading_error_deg(target_angle, start_heading)
-    return turn_left(angle_diff, timeout_ms)
+# ================================================================
+# Rutina Autónoma
+# ================================================================
+def autonomous_routine() -> None:
+    """
+    Rutina autónoma:
+    1. Avanza 118cm hacia adelante con odometría
+    2. Gira 90 grados a la izquierda pivotando sobre la llanta izquierda
+    """
 
-# ================================================
-# CONTROL DE MECANISMOS
-# ================================================
-def intake_on(speed=100):
-    """Enciende intake hacia adelante"""
-    intake.spin(FORWARD, speed, PERCENT)
-    intake_sup.spin(FORWARD, speed, PERCENT)
+    brain.screen.clear_screen()
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("Iniciando autonomo...")
+    
+    # 1. Avanzar 118cm hacia adelante usando odometría y activar pistón de descores
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Avanzando 118cm...")
+    drive_distance_cm(49, 50)  # 118cm a 50% velocidad
+    piston_descores.set(True)  # Activar pistón de descorers
+    wait(0.1, SECONDS)  # Pausa para estabilizar
 
-def intake_reverse(speed=100):
-    """Enciende intake en reversa"""
-    intake.spin(REVERSE, speed, PERCENT)
-    intake_sup.spin(REVERSE, speed, PERCENT)
+    # 2. Girar 90 grados a la izquierda (pivote sobre llanta izquierda)
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Girando 90 grados...")
+    turn_left_pivot_90(70)  # Girar a 60% velocidad
+    wait(0.2, SECONDS)  # Pausa para estabilizar
 
-def intake_off():
-    """Apaga intake"""
+    # 3. Avanzar otros 40cm hacia adelante usando odometría
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Avanzando 40cm...")
+    drive_distance_cm(23, 100)  # 40cm a 100% velocidad
+    wait(0.2, SECONDS)  # Pausa para estabilizar
+
+    # 4. Activar motores y hacer movimiento de sacudida para recoger pelotas
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("recogiendo pelotas...")
+    
+    # 4.1 Activar intake, intake_sup y cannon en Forward para recoger pelotas del cargador
+    intake.spin(FORWARD, 80, PERCENT)
+    intake_sup.spin(FORWARD, 80, PERCENT)
+    cannon.spin(FORWARD, 40, PERCENT)
+    wait(0.2, SECONDS)  # Pausa para estabilizar
+
+    # 4.2 y 4.3 Hacer movimientos de sacudida hasta detectar objeto near
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Cargando pelotas...")
+    
+    # LED del sensor apagado durante la carga
+    optical_sensor.set_light_power(0, PERCENT)
+    
+    # Repetir movimiento de sacudida hasta detectar objeto near
+    max_iterations = 20  # Máximo 20 ciclos (~8 segundos) para evitar bucle infinito
+    iteration_count = 0
+    
+    while not is_object_near() and iteration_count < max_iterations:
+        # Sacudida hacia adelante (corta y rápida)
+        motor_left.spin(FORWARD, 60, PERCENT)
+        motor_right.spin(FORWARD, 60, PERCENT)
+        wait(0.2, SECONDS)
+        
+        # Sacudida hacia atrás (corta y rápida)
+        motor_left.spin(REVERSE, 60, PERCENT)
+        motor_right.spin(REVERSE, 60, PERCENT)
+        wait(0.2, SECONDS)
+        
+        iteration_count += 1
+    
+    # 4.3 Detener motores de intake/cannon y drive train
+    brain.screen.set_cursor(2, 1)
+    if is_object_near():
+        brain.screen.print("Carga completa!")
+        wait(.2, SECONDS)  # Esperar 1 segundo más después de detectar near
+    else:
+        brain.screen.print("Tiempo de carga terminado")
+    
     intake.stop()
     intake_sup.stop()
-
-def cannon_on(speed=100):
-    """Enciende cañón"""
-    cannon.spin(FORWARD, speed, PERCENT)
-
-def cannon_reverse(speed=100):
-    """Cañón en reversa"""
-    cannon.spin(REVERSE, speed, PERCENT)
-
-def cannon_off():
-    """Apaga cañón"""
     cannon.stop()
+    motor_left.stop()
+    motor_right.stop()
+    wait(0.2, SECONDS)  # Pausa para estabilizar
 
-def descore_open():
-    """Abre pistón descore"""
-    piston_descores.set(True)
+    #5. Girar 10 grados para alinear con la portería
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Alineando con porteria...")
+    turn_right_degrees(15, 50)  # Girar 10 grados a la derecha a 50% velocidad
+    wait(0.2, SECONDS)  # Pausa para estabilizar
 
-def descore_close():
-    """Cierra pistón descore"""
+    
+    #6. Ir atrás 70 cm para despegar de la portería y ensestar
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Retrocediendo 90cm...")
+    drive_distance_cm(-50, 60)  # -80cm a 50% velocidad
+    wait(0.2, SECONDS)  # Pausa para estabilizar
+
+    motor_left.stop(HOLD)
+    motor_right.stop(HOLD)
+
+    #7. Ensestar: activar intake, intake_sup y cannon con filtrado de colores
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Ensestando...")
+    
+    # Activar LED del sensor óptico al 100% durante el paso 7
+    optical_sensor.set_light_power(100, PERCENT)
+    
+    # Tiempo total de ensestado (en ciclos de 0.1 segundos)
+    max_cycles = 30  # 3 segundos total
+    cycle_count = 0
+    enemy_detected = False
+    
+    while cycle_count < max_cycles and not enemy_detected:
+        # Si somos equipo rojo
+        if team_is_red:
+            # Detectar si hay pelota azul (color enemigo)
+            if is_blue_detected():
+                # DETENER intakes inmediatamente
+                intake.stop()
+                intake_sup.stop()
+                brain.screen.set_cursor(3, 1)
+                brain.screen.print("Pelota azul bloqueada!")
+                # Esperar 0.3 segundos para que cannon termine de empujar pelota amiga
+                wait(0.3, SECONDS)
+                cannon.stop()
+                enemy_detected = True  # Marcar para salir del bucle
+            else:
+                # Continuar normalmente (dejar pasar rojas)
+                intake.spin(FORWARD, 80, PERCENT)
+                intake_sup.spin(FORWARD, 80, PERCENT)
+                cannon.spin(REVERSE, 100, PERCENT)
+        else:
+            # Si somos equipo azul (lógica inversa)
+            if is_red_detected():
+                # DETENER intakes inmediatamente
+                intake.stop()
+                intake_sup.stop()
+                brain.screen.set_cursor(3, 1)
+                brain.screen.print("Pelota roja bloqueada!")
+                # Esperar 0.3 segundos para que cannon termine de empujar pelota amiga
+                wait(0.3, SECONDS)
+                cannon.stop()
+                enemy_detected = True  # Marcar para salir del bucle
+            else:
+                # Continuar normalmente (dejar pasar azules)
+                intake.spin(FORWARD, 80, PERCENT)
+                intake_sup.spin(FORWARD, 80, PERCENT)
+                cannon.spin(REVERSE, 100, PERCENT)
+        
+        wait(0.1, SECONDS)
+        cycle_count += 1
+    
+    # Detener todos los motores y apagar LED
+    intake.stop()
+    intake_sup.stop()
+    cannon.stop()
+    optical_sensor.set_light_power(0, PERCENT)
+
+    # Finalizar rutina
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Autonomo completado")
+
+# ================================================
+# Inicialización de posiciones
+# ================================================
+def init_positions() -> None:
+    motor_left.reset_position()
+    motor_right.reset_position()
+    cannon.reset_position()
+    intake.reset_position()
+    intake_sup.reset_position()
+    # Pistones en posición inicial
+    piston_trasero.set(False)
     piston_descores.set(False)
 
-def trasero_open():
-    """Abre pistón trasero (tumba burros)"""
-    piston_trasero.set(True)
 
-def trasero_close():
-    """Cierra pistón trasero"""
-    piston_trasero.set(False)
-
-# ================================================
-# RUTINA DE AUTÓNOMO
-# ================================================
-def autonomous():
-    """Rutina principal de autónomo"""
+# ================================================================
+# Programa principal
+# ================================================================
+def main() -> None:
     brain.screen.clear_screen()
-    brain.screen.print("Autonomo Iniciando")
-    
-    # 1. Calibrar
-    calibrate()
-    
-    # 2. Iniciar odometría
-    start_odometry()
-    
-    # 3. Establecer posición inicial (opcional)
-    # set_position(0, 0, 0)  # Origen en (0,0) mirando a 0°
-    
-    wait(500, MSEC)
-    
-    # ====== RUTINA DE EJEMPLO ======
-    brain.screen.print("Ejecutando rutina...")
-    
-    # Ejemplo 1: Avanzar 20 pulgadas
-    forward(20)
-    wait(500, MSEC)
-    
-    # Ejemplo 2: Girar 15° a la izquierda
-    turn_left(17)
-    wait(500, MSEC)
-    
-    # Bajar descore después del giro
-    descore_open()
-    brain.screen.print("Descore ABAJO")
-    wait(500, MSEC)
-    
-    # Ejemplo 3: Avanzar 12 pulgadas
-    forward(6)
-    wait(500, MSEC)
-    
-    # Ejemplo 4: Encender intake
-    intake_on(100)
-    wait(1000, MSEC)
-    intake_off()
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("PushBack Autonomo")
 
-        # 9. Mover un poco atras para despegar pitillo
-    brain.screen.set_cursor(2, 1)
-    brain.screen.print("Retrocediendo un poco...")
-    drive_backward(10, .2)
-
-    wait(1, SECONDS)
-
-    # 9. Girar derecha 180 grados (106 reales)
-    brain.screen.set_cursor(2, 1)
-    brain.screen.print("Girando derecha 180...")
-    turn_right_degrees(100)
-
-    wait(1, SECONDS)
-
-    # 11. Ir adelante para encestar
-    brain.screen.set_cursor(2, 1)
-    brain.screen.print("Avanzando para encestar...")
-    drive_forward(50, 0.5)
-    move_ramp_to_alto()
-    raise_pitillo()
-    brush_bottom.stop()
-    brush_front.stop()
-    fire_cannon_left()
-    fire_cannon_left()
+    # Selector de equipo
+    select_team()
     
-    # Ejemplo 5: Ir a un punto específico
-    # drive_to(24, 24)  # Ir a coordenadas (24, 24)
+    # Inicializar posiciones
+    init_positions()
     
-    # Ejemplo 6: Girar a ángulo absoluto
-    # turn_to_angle(0)  # Volver a mirar hacia 0°
+    # Ejecutar rutina autónoma
+    autonomous_routine()
     
-    # ====== FIN DE RUTINA ======
-    
-    # 4. Detener odometría
-    stop_odometry()
-    
-    brain.screen.set_cursor(5, 1)
-    brain.screen.print("COMPLETADO")
+    brain.screen.set_cursor(3, 1)
+    brain.screen.print("Programa finalizado")
 
-# ================================================
-# PUNTO DE ENTRADA
-# ================================================
+# ------------------------------------------------
+# Punto de entrada
+# ------------------------------------------------
 if __name__ == "__main__":
-    autonomous()
+    main()

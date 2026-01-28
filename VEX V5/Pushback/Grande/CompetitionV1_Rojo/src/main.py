@@ -1,121 +1,131 @@
 # =================================================================
-# VEXcode – Configuración y Teleoperado (Grande – Modo manual v2.0)
-# He implementado algunas optimizaciones sobre el codigo anterior
+# VEXcode – Competencia Oficial (Grande – v3.0)
 # -----------------------------------------------------------------
+#
 # Autor: @deepdevjose
 # =================================================================
 
 from vex import *
+import time
 
-# Import typing si está disponible (algunos firmwares de VEX pueden no tenerlo, es cosa de checar bien la version del firmware)
-# El modulo typing: Soporta typeo gradual definido por PEP 484.
+# Import typing si está disponible
 try:
     from typing import Optional
 except:
-    Optional = None  
+    Optional = None
 
 # ------------------------------------------------
-# Inicialización del cerebro y controlador, en esta seccion se crea una instatancia de la clase Brain que permite el acceso 
-# A la pantalla, bateria, puertos y el slot de la memoria SD
+# Inicialización del cerebro y controlador
 # ------------------------------------------------
 brain = Brain()
 controller = Controller()
 
 # ------------------------------------------------
-# Configuracion de puertos, aqui mapeo los puertos que se estan usando en el brain
+# CONFIGURACIÓN DE PUERTOS Y RATIOS
 # ------------------------------------------------
-# Tren motriz (Motores rojos 36:1)
+# Tren motriz (rojos 36:1)
 DRIVE_LEFT_PORT   = Ports.PORT3
 DRIVE_RIGHT_PORT  = Ports.PORT4
 
-# Rampa/Intake (Motores azules 6:1)
+# Intake (azul 6:1)
 INTAKE_PORT = Ports.PORT20
 INTAKE_SUP_PORT = Ports.PORT11
 
-# Cañón (Motores verdes 18:1)
+# Cañón (verde 18:1)
 CANNON_PORT = Ports.PORT16
 
-# Pistones neumáticos, tanto para los descores como el tumbaburros, y el elevador de la hexball
-piston_trasero = DigitalOut(brain.three_wire_port.a)
-piston_descores = DigitalOut(brain.three_wire_port.b)
+# Sensor óptico
+OPTICAL_SENSOR_PORT = Ports.PORT19
 
 # ------------------------------------------------
-# Parametros del tuning (Son parametros ajustados para el driver, esto hace que el robot responda tal como el driver quiere
-# (Ya lo ajuste al driver JJ)
+# PARÁMETROS DE TUNING
 # ------------------------------------------------
-# Loop timing - Este loop lo explicare en la bitacora, pero basicamente es un respiro para el brain, me gusta usar la analogia
-# de que es como la CA. 
+# Loop timing
 LOOP_TIME_MS = 20
 
-# Deadzone por eje (si es mayor en turn se evita el drift)
+# Deadzone por eje
 DEADZONE_FWD = 5
 DEADZONE_TURN = 8
 
-# Curva exponencial (0.0=lineal, 0.5=balanceado, 1.0=cúbico), esto lo ajuste asi es el balance entre la potencia que se mandan
-# desde los axis, a los motores, este lo ajuste para q mi driver se sienta comodo en la relacion traccion - potencia que envia el 
-# joystick
+# Curva exponencial
 EXPO_FWD = 0.5
 EXPO_TURN = 0.4
 
-# Slew rate (% cambio por ciclo de 20ms)
-# Slew asimétrico: aceleración lenta, frenado rápido
-SLEW_DRIVE_ACCEL = 8      # ~250ms para 0→100%
-SLEW_DRIVE_DECEL = 15     # Frenado más rápido
-SLEW_INTAKE_ACCEL = 25    # Más rápido para intake
-SLEW_INTAKE_DECEL = 40    # Frenado muy rápido
+# Slew rate asimétrico
+SLEW_DRIVE_ACCEL = 8
+SLEW_DRIVE_DECEL = 15
+SLEW_INTAKE_ACCEL = 25
+SLEW_INTAKE_DECEL = 40
 SLEW_CANNON_ACCEL = 25
 SLEW_CANNON_DECEL = 40
 
-# Modo de frenado drivetrain (COAST=suave, BRAKE=preciso)
+# Modo de frenado drivetrain
 DRIVE_BRAKE_MODE = BrakeType.COAST
 
-# Cooldown al soltar R1/L1 (ms sin aplicar toggles)
-OVERRIDE_COOLDOWN_MS = 100  # Reducido: ya tenemos rampa suave
+# Cooldown al soltar R1/L1
+OVERRIDE_COOLDOWN_MS = 100
 
-# Debounce para pistones (evitar doble toggle)
+# Debounce para pistones
 PISTON_DEBOUNCE_MS = 200
 
 # Anti-atasco (stall detection)
 ANTI_STALL_ENABLED = True
-STALL_SPEED_RPM = 30        # Velocidad < 30 RPM = posible atasco
-STALL_CMD_MIN_PCT = 70      # Solo detectar si comando ≥ 70%
-STALL_DETECT_MS = 250       # Confirmar tras 250ms
-STALL_GRACE_PERIOD_MS = 150 # Grace period tras arranque/cambio (evita falsos positivos)
-# IMPORTANTE: GRACE_PERIOD_MS debe ser < DETECT_MS, sino nunca lo detecta
+STALL_SPEED_RPM = 30
+STALL_CMD_MIN_PCT = 70
+STALL_DETECT_MS = 250
+STALL_GRACE_PERIOD_MS = 150
 STALL_PULSE_REVERSE_MS = 180
 STALL_PULSE_FORWARD_MS = 250
 
-# Derating térmico (reducción por temperatura)
+# Derating térmico
 DERATING_ENABLED = True
 TEMP_WARN_C = 50.0
 TEMP_SOFT_C = 55.0
 TEMP_HARD_C = 60.0
-DERATE_SOFT = 85    # % potencia en zona soft
-DERATE_HARD = 70    # % potencia en zona hard
+DERATE_SOFT = 85
+DERATE_HARD = 70
+
+# Rangos de colores para sensor óptico (HUE)
+COLOR_RED_MIN = 3
+COLOR_RED_MAX = 17
+COLOR_BLUE_MIN = 148
+COLOR_BLUE_MAX = 215
 
 # ------------------------------------------------
-# Instancias de motores, por comodidad, es mejor saber que estas leyendo de una forma mas normal jajaja.
+# Parámetros de odometría 2D
 # ------------------------------------------------
-motor_left  = Motor(DRIVE_LEFT_PORT,  GearSetting.RATIO_18_1, False) 
-motor_right = Motor(DRIVE_RIGHT_PORT, GearSetting.RATIO_18_1, True)
+WHEEL_DIAMETER_CM = 10.0
+WHEEL_TRAVEL_CM = 33.5
+WHEEL_DEGREES = 364.0
+DEGREES_PER_CM = WHEEL_DEGREES / WHEEL_TRAVEL_CM
+
+# ------------------------------------------------
+# Instancias de motores
+# ------------------------------------------------
+motor_left  = Motor(DRIVE_LEFT_PORT,  GearSetting.RATIO_36_1, False) 
+motor_right = Motor(DRIVE_RIGHT_PORT, GearSetting.RATIO_36_1, True)
 
 intake = Motor(INTAKE_PORT, GearSetting.RATIO_6_1, False)
 intake_sup = Motor(INTAKE_SUP_PORT, GearSetting.RATIO_6_1, True)
 
 cannon = Motor(CANNON_PORT, GearSetting.RATIO_18_1, False)
 
+# Pistones neumáticos
+piston_trasero = DigitalOut(brain.three_wire_port.a)
+piston_descores = DigitalOut(brain.three_wire_port.b)
+
+# Sensor óptico
+optical_sensor = Optical(OPTICAL_SENSOR_PORT)
 
 # ------------------------------------------------
 # Configuración de motores
 # ------------------------------------------------
-# Torque máximo (100% = sin límite artificial)
 motor_left.set_max_torque(100, PERCENT)
 motor_right.set_max_torque(100, PERCENT)
 intake.set_max_torque(100, PERCENT)
 intake_sup.set_max_torque(100, PERCENT)
 cannon.set_max_torque(100, PERCENT)
 
-# Modo de frenado
 motor_left.set_stopping(DRIVE_BRAKE_MODE)
 motor_right.set_stopping(DRIVE_BRAKE_MODE)
 intake.set_stopping(BrakeType.BRAKE)
@@ -126,33 +136,37 @@ motor_left.set_velocity(100, PERCENT)
 motor_right.set_velocity(100, PERCENT)
 
 # ------------------------------------------------
-# Constantes de estado (eviten siemnpre strings frágiles)
+# Constantes de estado
 # ------------------------------------------------
 INTAKE_OFF = 0
-INTAKE_A_ON = 1  # intake fwd 100% + cannon fwd 30%
-INTAKE_B_ON = 2  # intake rev 100%, cannon off
+INTAKE_A_ON = 1
+INTAKE_B_ON = 2
 
 # ------------------------------------------------
-# Variables de estado global estas las uso para mapear siempre en que estado estamos y evitar sobrecondiciones es dedir que se atasquen
+# Variables de estado global
 # ------------------------------------------------
+# Configuración permanente: EQUIPO ROJO
+# No requiere selección - siempre rechaza pelotas azules
+team_is_red = True  # FIJO: No cambiar
+
 # Pistones
 descore_open = False
 trasero_open = False
-last_piston_toggle = {"Y": 0, "X": 0}  # Timestamp de último toggle
+last_piston_toggle = {"Y": 0, "X": 0}
 
 # Toggles
 intake_state = INTAKE_OFF
 prev = {"R1": False, "L1": False, "A": False, "B": False, "Y": False, "X": False}
 
-# Estado de dirección para rampa segura en cannon - si cannon pq mi teclado esta en ingles
-cannon_dir_state = "STOP"  # Actual dirección física del cannon
+# Estado de dirección para rampa segura
+cannon_dir_state = "STOP"
 
-# Slew state (valores actuales tras rampa)
+# Slew state
 slew_drive = {"L": 0, "R": 0}
 slew_intake_pct = 0
 slew_cannon_pct = 0
 
-# Cache de comandos aplicados (anti-spam)
+# Cache de comandos aplicados
 last_drive_cmd = {"L": 0, "R": 0}
 last_intake_cmd = {"pct": 0, "dir": "STOP"}
 last_cannon_cmd = {"pct": 0, "dir": "STOP"}
@@ -160,9 +174,9 @@ last_cannon_cmd = {"pct": 0, "dir": "STOP"}
 # Override R1/L1
 override_cooldown_until = 0
 
-# Anti-stall state machine, esto lo explicare mas a detalle en la bitacora
+# Anti-stall state machine
 stall = {
-    "phase": "IDLE",        # IDLE / DETECT / PULSE_REV / PULSE_FWD
+    "phase": "IDLE",
     "since_ms": 0,
     "phase_until_ms": 0,
     "last_cmd_dir": "STOP",
@@ -170,26 +184,24 @@ stall = {
 
 # Telemetría
 last_telemetry_ms = 0
-last_temp_sample_ms = 0  # Timestamp de último sample de temperatura
+last_temp_sample_ms = 0
 sensor_failures = {
-    "intake_temp": 0,      # Intake principal
-    "intake_sup_temp": 0,  # Intake superior (separado para diagnóstico)
+    "intake_temp": 0,
+    "intake_sup_temp": 0,
     "cannon_temp": 0, 
     "intake_vel": 0
 }
 
-# Cache de lecturas de sensores (sample cada 50ms, más frecuente que telemetría)
+# Cache de temperaturas
 temp_cache = {
     "intake": (0, "OK"), 
-    "intake_sup": (0, "OK"),  # Cache separado para intake_sup
+    "intake_sup": (0, "OK"),
     "cannon": (0, "OK")
 }
 
-# ------------------------------------------------
-# Utilidades, aqui basicamente lo que hago es definir funciones que me ayudan a hacer mas preciso el robot
-# que no se atasquen y principalmente optimizaciones. Usare docstring o asi para que sea mas sencillo leerlo, o
-# jala no se me olvide
-# ------------------------------------------------
+# ================================================================
+# FUNCIONES UTILITARIAS
+# ================================================================
 def now_ms() -> int:
     """Tiempo actual en milisegundos."""
     return brain.timer.time(MSEC)
@@ -203,10 +215,7 @@ def deadband(v: int, db: int) -> int:
     return 0 if abs(v) < db else v
 
 def expo(v: int, k: float) -> int:
-    """Curva exponencial: y = (1-k)*x + k*x³
-    Mejora precisión en zona media sin perder extremos.
-    k=0 es lineal, k=1 es cúbico puro.
-    """
+    """Curva exponencial: y = (1-k)*x + k*x³"""
     if v == 0:
         return 0
     x = max(-100, min(100, v)) / 100.0
@@ -214,7 +223,7 @@ def expo(v: int, k: float) -> int:
     return int(round(y * 100))
 
 def slew_step(current: int, target: int, step_accel: int, step_decel = None) -> int:
-    """Slew asimétrico robusto (maneja cruces de 0 correctamente)."""
+    """Slew asimétrico robusto."""
     if step_decel is None:
         step_decel = step_accel
 
@@ -228,7 +237,7 @@ def slew_step(current: int, target: int, step_accel: int, step_decel = None) -> 
         else:
             return min(current + step_decel, 0)
 
-    # Misma dirección (o uno es 0): decidir por magnitud
+    # Misma dirección: decidir por magnitud
     if abs(target) > abs(current):
         step = step_accel
     else:
@@ -240,9 +249,7 @@ def slew_step(current: int, target: int, step_accel: int, step_decel = None) -> 
         return max(current - step, target)
 
 def temp_derate_pct(motor_name: str) -> int:
-    """Retorna factor de reducción (%) según temperatura del motor.
-    Usa cache de temp_cache (sin side effects de lectura).
-    """
+    """Retorna factor de reducción (%) según temperatura del motor."""
     if not DERATING_ENABLED:
         return 100
     
@@ -259,7 +266,7 @@ def temp_derate_pct(motor_name: str) -> int:
     return 100
 
 def get_temp_status(m: Motor) -> tuple:
-    """Retorna (temperatura, estado) donde estado es 'OK', 'WARN', 'SOFT', 'HARD', o 'ERR'."""
+    """Retorna (temperatura, estado)."""
     try:
         t = m.temperature()
         if t >= TEMP_HARD_C:
@@ -273,12 +280,9 @@ def get_temp_status(m: Motor) -> tuple:
         return (0, "ERR")
 
 def sample_temperatures():
-    """Sample de temperaturas cada ~50ms (más frecuente que telemetría).
-    Evita lecturas redundantes y garantiza consistencia entre control y display.
-    """
+    """Sample de temperaturas cada ~50ms."""
     global temp_cache
     
-    # Helper para clasificar temperatura
     def classify_temp(t):
         if t >= TEMP_HARD_C:
             return "HARD"
@@ -297,12 +301,12 @@ def sample_temperatures():
         sensor_failures["intake_temp"] += 1
         temp_cache["intake"] = (0, "ERR")
     
-    # Intake superior (separado para derating correcto)
+    # Intake superior
     try:
         t = intake_sup.temperature()
         temp_cache["intake_sup"] = (t, classify_temp(t))
     except:
-        sensor_failures["intake_sup_temp"] += 1  # Contador separado
+        sensor_failures["intake_sup_temp"] += 1
         temp_cache["intake_sup"] = (0, "ERR")
     
     # Cannon
@@ -314,28 +318,81 @@ def sample_temperatures():
         temp_cache["cannon"] = (0, "ERR")
 
 def get_worst_status(status1: str, status2: str) -> str:
-    """Retorna el peor status térmico por severidad (para display correcto)."""
+    """Retorna el peor status térmico por severidad."""
     severity = {"ERR": 0, "HARD": 4, "SOFT": 3, "WARN": 2, "OK": 1}
     s1_sev = severity.get(status1, 0)
     s2_sev = severity.get(status2, 0)
     return status1 if s1_sev >= s2_sev else status2
 
-# No se me olvido jajaj
+# ================================================================
+# FUNCIONES DE DETECCIÓN DE COLORES
+# ================================================================
+def is_red_detected() -> bool:
+    """Verifica si el sensor detecta color rojo."""
+    hue = optical_sensor.hue()
+    return COLOR_RED_MIN <= hue <= COLOR_RED_MAX
 
+def is_blue_detected() -> bool:
+    """Verifica si el sensor detecta color azul."""
+    hue = optical_sensor.hue()
+    return COLOR_BLUE_MIN <= hue <= COLOR_BLUE_MAX
 
-# De aqui en adelante estan las capas del programa, son como un sandwich:
-# la primer capa es la logica, 
-# la segunda es de seguridad
-# y la tercera es de aplicacion, tal cual asi sencillo. 
-# Despues sigue la inicializacion, y el main loop.
+def is_object_near() -> bool:
+    """Verifica si hay un objeto cerca."""
+    return optical_sensor.is_near_object()
+
+# NOTA: Función select_team() eliminada
+# El robot está configurado permanentemente para EQUIPO ROJO
 
 # ================================================================
-# CAPA 1: Compute Setpoints (Esta es la lógica de control)
+# FUNCIONES DE MOVIMIENTO AUTÓNOMO
+# ================================================================
+def drive_distance_cm(distance_cm: float, velocity: int = 50) -> None:
+    """Mueve el robot una distancia específica en centímetros."""
+    degrees_to_turn = distance_cm * DEGREES_PER_CM
+    
+    motor_left.reset_position()
+    motor_right.reset_position()
+    
+    direction = FORWARD if distance_cm > 0 else REVERSE
+    degrees_abs = abs(degrees_to_turn)
+    
+    motor_left.spin_for(direction, degrees_abs, DEGREES, velocity, PERCENT, False)
+    motor_right.spin_for(direction, degrees_abs, DEGREES, velocity, PERCENT, True)
+
+def turn_right_degrees(degrees: float, velocity: int) -> None:
+    """Gira el robot a la derecha."""
+    duration = abs(degrees) / 100.0
+    motor_left.spin(FORWARD, velocity, PERCENT)
+    motor_right.spin(REVERSE, velocity, PERCENT)
+    wait(duration, SECONDS)
+    motor_left.stop()
+    motor_right.stop()
+
+def turn_left_pivot_90(velocity: int = 50) -> None:
+    """Gira 90 grados a la izquierda pivotando sobre la llanta izquierda."""
+    pivot_distance_cm = 20.0
+    degrees_to_turn = pivot_distance_cm * DEGREES_PER_CM
+    
+    motor_right.reset_position()
+    motor_left.stop(BrakeType.BRAKE)
+    motor_right.spin_for(FORWARD, degrees_to_turn, DEGREES, velocity, PERCENT, True)
+    
+    motor_right.stop(BrakeType.BRAKE)
+    motor_left.reset_position()
+    
+    back_distance_cm = 15.5
+    back_degrees = back_distance_cm * DEGREES_PER_CM
+    motor_left.spin_for(REVERSE, back_degrees, DEGREES, velocity, PERCENT)
+    
+    motor_left.stop(BrakeType.BRAKE)
+    motor_right.stop(BrakeType.BRAKE)
+
+# ================================================================
+# CAPA 1: COMPUTE SETPOINTS (TELEOPERADO)
 # ================================================================
 def compute_drive_setpoints() -> tuple:
-    """Calcula setpoints de drivetrain con expo, deadzone y mezcla arcade.
-    Retorna: (left_pct, right_pct)
-    """
+    """Calcula setpoints de drivetrain."""
     fwd = deadband(controller.axis3.position(), DEADZONE_FWD)
     turn = deadband(controller.axis4.position(), DEADZONE_TURN)
 
@@ -347,10 +404,10 @@ def compute_drive_setpoints() -> tuple:
     return left, right
 
 def update_toggles():
-    """Actualiza estados de toggles (A, B, Y, X) con debounce en pistones."""
+    """Actualiza estados de toggles."""
     global intake_state, descore_open, trasero_open
     
-    t = now_ms()  # Lectura local para debounce
+    t = now_ms()
 
     a = controller.buttonA.pressing()
     if a and not prev["A"]:
@@ -362,7 +419,6 @@ def update_toggles():
         intake_state = INTAKE_OFF if intake_state == INTAKE_B_ON else INTAKE_B_ON
     prev["B"] = b
 
-    # Pistones con debounce (evita doble toggle por rebote humano)
     y = controller.buttonY.pressing()
     if y and not prev["Y"]:
         if (t - last_piston_toggle["Y"]) >= PISTON_DEBOUNCE_MS:
@@ -378,19 +434,12 @@ def update_toggles():
     prev["X"] = x
 
 def compute_mechanism_setpoints(current_time: int) -> tuple:
-    """Calcula setpoints de intake/cannon con prioridad override > toggles.
-    Retorna: (intake_cmd, cannon_cmd)
-    donde cmd = (pct, dir) con dir in ["FORWARD", "REVERSE", "STOP"]
-    """
+    """Calcula setpoints de intake/cannon."""
     global override_cooldown_until
 
     r1 = controller.buttonR1.pressing()
     l1 = controller.buttonL1.pressing()
 
-    # Prioridad 1: Override R1/L1 (control directo)
-    # NOTA: R1 = intake FWD + cannon REV (shoot/fire)
-    #       L1 = intake REV + cannon OFF (unjam/reverse)
-    # Verificar que coincide con driver intent antes de torneo
     if r1:
         override_cooldown_until = current_time + OVERRIDE_COOLDOWN_MS
         return (100, "FORWARD"), (100, "REVERSE")
@@ -399,14 +448,11 @@ def compute_mechanism_setpoints(current_time: int) -> tuple:
         override_cooldown_until = current_time + OVERRIDE_COOLDOWN_MS
         return (100, "REVERSE"), (0, "STOP")
 
-    # Cooldown mejorado: en vez de STOP, retorna suavemente al toggle
-    # Esto evita el "lag" percibido al soltar override
     in_cooldown = current_time < override_cooldown_until
 
-    # Prioridad 2: Toggles A/B (con rampa durante cooldown)
     if intake_state == INTAKE_A_ON:
-        pct = 50 if in_cooldown else 100  # Rampa suave en cooldown
-        return (pct, "FORWARD"), (30, "FORWARD")  # 30% para mejor consistencia
+        pct = 50 if in_cooldown else 100
+        return (pct, "FORWARD"), (30, "FORWARD")
     if intake_state == INTAKE_B_ON:
         pct = 50 if in_cooldown else 100
         return (pct, "REVERSE"), (0, "STOP")
@@ -414,32 +460,28 @@ def compute_mechanism_setpoints(current_time: int) -> tuple:
     return (0, "STOP"), (0, "STOP")
 
 # ================================================================
-# CAPA 2: Safety & Reliability (anti-stall)
+# CAPA 2: SAFETY & RELIABILITY
 # ================================================================
 def apply_anti_stall(intake_cmd: tuple, current_time: int) -> tuple:
-    """Detecta atasco y aplica pulso reversa automático.
-    State machine: IDLE → DETECT → PULSE_REV → PULSE_FWD → IDLE
-    """
+    """Detecta atasco y aplica pulso reversa automático."""
     if not ANTI_STALL_ENABLED:
         return intake_cmd
 
     pct, direction = intake_cmd
 
-    # Solo aplica si hay comando fuerte
     if direction == "STOP" or abs(pct) < STALL_CMD_MIN_PCT:
         stall["phase"] = "IDLE"
         stall["since_ms"] = 0
         return intake_cmd
 
-    # Medir velocidad real de AMBOS motores en RPM (más confiable que PERCENT)
     try:
         v1 = intake.velocity(RPM)
         v2 = intake_sup.velocity(RPM)
-        v_abs = min(abs(v1), abs(v2))  # Si uno está atascado, lo detectamos
+        v_abs = min(abs(v1), abs(v2))
     except:
         sensor_failures["intake_vel"] += 1
         return intake_cmd
-    t = current_time  # Usar timestamp pasado
+    t = current_time
 
     if stall["phase"] == "IDLE":
         stall["phase"] = "DETECT"
@@ -448,46 +490,37 @@ def apply_anti_stall(intake_cmd: tuple, current_time: int) -> tuple:
         return intake_cmd
 
     if stall["phase"] == "DETECT":
-        # Si cambió dirección, reinicia con grace period
         if direction != stall["last_cmd_dir"]:
             stall["since_ms"] = t
             stall["last_cmd_dir"] = direction
             return intake_cmd
 
-        # Grace period: esperar un poco tras arranque antes de detectar stall
         elapsed = t - stall["since_ms"]
         if elapsed < STALL_GRACE_PERIOD_MS:
             return intake_cmd
 
-        # Detectar stall sostenido (solo después del grace period)
         if v_abs <= STALL_SPEED_RPM and elapsed >= STALL_DETECT_MS:
             stall["phase"] = "PULSE_REV"
             stall["phase_until_ms"] = t + STALL_PULSE_REVERSE_MS
-            # Pulso reversa
             return (100, "REVERSE" if direction == "FORWARD" else "FORWARD")
 
-        # Motor OK: refresca timer
         if v_abs > STALL_SPEED_RPM + 10:
             stall["since_ms"] = t
         return intake_cmd
 
     if stall["phase"] == "PULSE_REV":
-        # Si driver cambia comando durante pulso, abortar y resetear
         if direction != stall["last_cmd_dir"]:
             stall["phase"] = "IDLE"
             stall["since_ms"] = t
             return intake_cmd
         
         if t < stall["phase_until_ms"]:
-            # Mantener reversa
             return (100, "REVERSE" if stall["last_cmd_dir"] == "FORWARD" else "FORWARD")
-        # Pasar a forward
         stall["phase"] = "PULSE_FWD"
         stall["phase_until_ms"] = t + STALL_PULSE_FORWARD_MS
         return (100, stall["last_cmd_dir"])
 
     if stall["phase"] == "PULSE_FWD":
-        # Si driver cambia comando durante pulso, abortar y resetear
         if direction != stall["last_cmd_dir"]:
             stall["phase"] = "IDLE"
             stall["since_ms"] = t
@@ -495,7 +528,6 @@ def apply_anti_stall(intake_cmd: tuple, current_time: int) -> tuple:
         
         if t < stall["phase_until_ms"]:
             return (100, stall["last_cmd_dir"])
-        # Fin del ciclo
         stall["phase"] = "IDLE"
         stall["since_ms"] = t
         return intake_cmd
@@ -503,14 +535,13 @@ def apply_anti_stall(intake_cmd: tuple, current_time: int) -> tuple:
     return intake_cmd
 
 # ================================================================
-# CAPA 3: Apply Actuators (físico con cache, slew, derating)
+# CAPA 3: APPLY ACTUATORS
 # ================================================================
 def apply_drive(left_target: int, right_target: int):
-    """Aplica setpoints de drivetrain con slew asimétrico y dirección explícita."""
+    """Aplica setpoints de drivetrain."""
     slew_drive["L"] = slew_step(slew_drive["L"], left_target, SLEW_DRIVE_ACCEL, SLEW_DRIVE_DECEL)
     slew_drive["R"] = slew_step(slew_drive["R"], right_target, SLEW_DRIVE_ACCEL, SLEW_DRIVE_DECEL)
 
-    # Anti-spam + dirección explícita (sin valores negativos en spin)
     if slew_drive["L"] != last_drive_cmd["L"]:
         v = slew_drive["L"]
         if v == 0:
@@ -532,26 +563,20 @@ def apply_drive(left_target: int, right_target: int):
         last_drive_cmd["R"] = v
 
 def apply_intake(cmd: tuple):
-    """Aplica comando de intake con slew, derating térmico y anti-spam.
-    Lógica mejorada: dirección y magnitud tienen fuente única de verdad.
-    """
+    """Aplica comando de intake."""
     global slew_intake_pct
 
     pct, direction = cmd
 
-    # Derating térmico (usar cache de AMBOS motores - el peor caso)
     der1 = temp_derate_pct("intake")
-    der2 = temp_derate_pct("intake_sup")  # Ahora sí usa cache separado
-    der = min(der1, der2)  # El peor de los dos
+    der2 = temp_derate_pct("intake_sup")
+    der = min(der1, der2)
     pct_derated = int(round(pct * der / 100.0))
 
-    # Determinar magnitud objetivo (siempre positiva)
     target_mag = 0 if direction == "STOP" else pct_derated
     
-    # Slew rate asimétrico
     slew_intake_pct = slew_step(slew_intake_pct, target_mag, SLEW_INTAKE_ACCEL, SLEW_INTAKE_DECEL)
 
-    # Derivar dirección final: STOP solo si magnitud es 0
     if slew_intake_pct == 0 or direction == "STOP":
         desired_dir = "STOP"
         desired_pct = 0
@@ -559,7 +584,6 @@ def apply_intake(cmd: tuple):
         desired_dir = direction
         desired_pct = slew_intake_pct
 
-    # Anti-spam
     if desired_pct == last_intake_cmd["pct"] and desired_dir == last_intake_cmd["dir"]:
         return
 
@@ -577,21 +601,14 @@ def apply_intake(cmd: tuple):
     last_intake_cmd["dir"] = desired_dir
 
 def apply_cannon(cmd: tuple):
-    """Aplica comando de cañón con gate de dirección: si invierte, primero va a STOP.
-    Evita slam mecánico con máquina de estados simple.
-    
-    NOTA: Si el driver hace 'tap' rápido para invertir, el cañón puede quedarse en STOP
-    (necesita mantener el comando hasta que rampa a 0 y luego invierte).
-    """
+    """Aplica comando de cañón."""
     global slew_cannon_pct, cannon_dir_state
 
     pct, desired_dir = cmd
 
-    # Derating térmico (usar cache)
     der = temp_derate_pct("cannon")
     pct = int(round(pct * der / 100.0))
 
-    # Gate: si pide invertir mientras estaba girando, primero ir a STOP
     if (cannon_dir_state != "STOP" and desired_dir != "STOP" and desired_dir != cannon_dir_state):
         desired_dir = "STOP"
 
@@ -605,7 +622,6 @@ def apply_cannon(cmd: tuple):
         final_dir = desired_dir
         cannon_dir_state = desired_dir
 
-    # Anti-spam
     if slew_cannon_pct == last_cannon_cmd["pct"] and final_dir == last_cannon_cmd["dir"]:
         return
 
@@ -620,69 +636,216 @@ def apply_cannon(cmd: tuple):
     last_cannon_cmd["dir"] = final_dir
 
 def apply_pistons():
-    """Aplica estados de pistones neumáticos."""
+    """Aplica estados de pistones."""
     piston_descores.set(descore_open)
     piston_trasero.set(trasero_open)
 
 # ================================================================
-# Inicialización de posiciones seguras, aqui basicamente pongo el robot en una posicion segura cuando inicia
+# RUTINA AUTÓNOMA
 # ================================================================
-def init_positions():
-    """Posiciones iniciales seguras y sincronización de variables."""
-    global descore_open, trasero_open
-    
-    cannon.reset_position()
-    cannon.stop()
-    
-    # Sincronizar hardware con variables
-    descore_open = False
-    trasero_open = False
-    piston_descores.set(False)
-    piston_trasero.set(False)
-
-# ================================================================
-# Bucle principal, aqui ejecuto el loop principal del teleoperado.
-# ================================================================
-def main():
-    """Loop principal de teleoperado."""
-    global last_telemetry_ms, last_temp_sample_ms
-
+def autonomous_routine() -> None:
+    """Rutina autónoma completa."""
     brain.screen.clear_screen()
     brain.screen.set_cursor(1, 1)
-    brain.screen.print("Grande Robot v2.0")
+    brain.screen.print("Iniciando autonomo...")
+    
+    # 1. Avanzar 49cm y activar pistón de descores
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Avanzando 49cm...")
+    drive_distance_cm(49, 50)
+    piston_descores.set(True)
+    wait(0.1, SECONDS)
 
-    init_positions()
+    # 2. Girar 90 grados a la izquierda
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Girando 90 grados...")
+    turn_left_pivot_90(70)
+    wait(0.2, SECONDS)
+
+    # 3. Avanzar 23cm
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Avanzando 23cm...")
+    drive_distance_cm(23, 100)
+    wait(0.2, SECONDS)
+
+    # 4. Recoger pelotas
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Recogiendo pelotas...")
+    
+    intake.spin(FORWARD, 80, PERCENT)
+    intake_sup.spin(FORWARD, 80, PERCENT)
+    cannon.spin(FORWARD, 40, PERCENT)
+    wait(0.2, SECONDS)
+
+    # 4.2 Movimientos de sacudida
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Cargando pelotas...")
+    
+    optical_sensor.set_light_power(0, PERCENT)
+    
+    max_iterations = 20
+    iteration_count = 0
+    
+    while not is_object_near() and iteration_count < max_iterations:
+        motor_left.spin(FORWARD, 60, PERCENT)
+        motor_right.spin(FORWARD, 60, PERCENT)
+        wait(0.2, SECONDS)
+        
+        motor_left.spin(REVERSE, 60, PERCENT)
+        motor_right.spin(REVERSE, 60, PERCENT)
+        wait(0.2, SECONDS)
+        
+        iteration_count += 1
+    
+    # 4.3 Detener motores
+    brain.screen.set_cursor(2, 1)
+    if is_object_near():
+        brain.screen.print("Carga completa!")
+        wait(.2, SECONDS)
+    else:
+        brain.screen.print("Tiempo de carga terminado")
+    
+    intake.stop()
+    intake_sup.stop()
+    cannon.stop()
+    motor_left.stop()
+    motor_right.stop()
+    wait(0.2, SECONDS)
+
+    # 5. Girar 15 grados para alinear
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Alineando con porteria...")
+    turn_right_degrees(15, 50)
+    wait(0.2, SECONDS)
+    
+    # 6. Retroceder 50cm
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Retrocediendo 50cm...")
+    drive_distance_cm(-50, 60)
+    wait(0.2, SECONDS)
+
+    motor_left.stop(HOLD)
+    motor_right.stop(HOLD)
+
+    # 7. Ensestar con filtrado de colores (EQUIPO ROJO - rechaza azules)
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Ensestando...")
+    
+    optical_sensor.set_light_power(100, PERCENT)
+    
+    max_cycles = 30
+    cycle_count = 0
+    enemy_detected = False
+    
+    # Lógica simplificada: siempre somos ROJO, rechazamos AZUL
+    while cycle_count < max_cycles and not enemy_detected:
+        if is_blue_detected():
+            # DETENER: pelota enemiga detectada
+            intake.stop()
+            intake_sup.stop()
+            brain.screen.set_cursor(3, 1)
+            brain.screen.print("Pelota azul bloqueada!")
+            wait(0.3, SECONDS)
+            cannon.stop()
+            enemy_detected = True
+        else:
+            # Continuar: dejar pasar pelotas rojas
+            intake.spin(FORWARD, 80, PERCENT)
+            intake_sup.spin(FORWARD, 80, PERCENT)
+            cannon.spin(REVERSE, 100, PERCENT)
+        
+        wait(0.1, SECONDS)
+        cycle_count += 1
+    
+    # Detener todos los motores
+    intake.stop()
+    intake_sup.stop()
+    cannon.stop()
+    optical_sensor.set_light_power(0, PERCENT)
+
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Autonomo completado")
+
+# ================================================================
+# FUNCIONES DE COMPETENCIA (ESTRUCTURA REQUERIDA POR FCS)
+# ================================================================
+def pre_auton():
+    """
+    Inicialización antes del autónomo.
+    CRÍTICO: No debe contener bucles infinitos ni esperas largas.
+    """
+    brain.screen.clear_screen()
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("Grande Robot v3.0")
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("EQUIPO: ROJO")
+    brain.screen.set_cursor(3, 1)
+    brain.screen.print("Competencia Oficial")
+    
+    # Resetear encoders
+    motor_left.reset_position()
+    motor_right.reset_position()
+    cannon.reset_position()
+    intake.reset_position()
+    intake_sup.reset_position()
+    
+    # Pistones en posición inicial
+    piston_trasero.set(False)
+    piston_descores.set(False)
+    
+    # Mostrar en controlador
+    controller.screen.clear_screen()
+    controller.screen.set_cursor(1, 1)
+    controller.screen.print("EQUIPO: ROJO")
+    
+    brain.screen.set_cursor(4, 1)
+    brain.screen.print("Pre-auton completado")
+    wait(0.5, SECONDS)
+
+def autonomous():
+    """
+    Función autónoma - llamada por FCS cuando inicia el período autónomo.
+    """
+    autonomous_routine()
+
+def user_control():
+    """
+    Función de control de usuario - llamada por FCS durante el período de driver.
+    """
+    global last_telemetry_ms, last_temp_sample_ms
+    
+    brain.screen.clear_screen()
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("Driver Control Activo")
+
     last_telemetry_ms = now_ms()
     last_temp_sample_ms = now_ms()
 
     while True:
-        # Sample único de tiempo al inicio del ciclo (evita jitter y lecturas inconsistentes)
         cycle_start = now_ms()
 
-        # 1) Sample de temperaturas (cada 50ms, independiente de telemetría)
+        # Sample de temperaturas (cada 50ms)
         if (cycle_start - last_temp_sample_ms) >= 50:
             sample_temperatures()
             last_temp_sample_ms = cycle_start
 
-        # 2) Leer inputs y compute setpoints
+        # Leer inputs y compute setpoints
         update_toggles()
         left_sp, right_sp = compute_drive_setpoints()
         intake_cmd, cannon_cmd = compute_mechanism_setpoints(cycle_start)
 
-        # 3) Safety layers
+        # Safety layers
         intake_cmd = apply_anti_stall(intake_cmd, cycle_start)
 
-        # 4) Apply a motores físicos
+        # Apply a motores físicos
         apply_drive(left_sp, right_sp)
         apply_intake(intake_cmd)
         apply_cannon(cannon_cmd)
         apply_pistons()
 
-        # 5) Telemetría estable (cada 100ms, sin jitter)
+        # Telemetría (cada 100ms)
         if (cycle_start - last_telemetry_ms) >= 100:
             last_telemetry_ms = cycle_start
-            
-            # Ya no llamamos sample_temperatures aquí (se hace cada 50ms arriba)
             
             brain.screen.set_cursor(2, 1)
             brain.screen.print("D:{} T:{} I:{}  ".format(
@@ -699,26 +862,23 @@ def main():
                 last_cannon_cmd["pct"]
             ))
             
-            # Mostrar temperaturas y estado de derating (desde WARN=50°C)
+            # Temperaturas
             brain.screen.set_cursor(4, 1)
-            # Elegir peor temperatura y peor status entre intake e intake_sup
             i_temp = max(temp_cache["intake"][0], temp_cache["intake_sup"][0])
             i_status = get_worst_status(temp_cache["intake"][1], temp_cache["intake_sup"][1])
             c_temp, c_status = temp_cache["cannon"]
             
             if i_status != "OK" or c_status != "OK":
-                # Formato claro: I55W=Intake 55°C Warning, ERR explícito
                 i_str = "ERR" if i_status == "ERR" else "{}{}".format(int(i_temp), i_status[0])
                 c_str = "ERR" if c_status == "ERR" else "{}{}".format(int(c_temp), c_status[0])
                 brain.screen.print("T:I{} C{}  ".format(i_str, c_str))
             else:
                 brain.screen.print("                    ")
             
-            # Mostrar errores de sensores solo si hay fallos (con separadores para legibilidad)
+            # Errores de sensores
             total_errors = sum(sensor_failures.values())
             if total_errors > 0:
                 brain.screen.set_cursor(5, 1)
-                # Agregar intake_sup a telemetría (Is = intake_sup)
                 brain.screen.print("ERR V:{} I:{} Is:{} C:{}  ".format(
                     sensor_failures["intake_vel"],
                     sensor_failures["intake_temp"],
@@ -729,13 +889,26 @@ def main():
                 brain.screen.set_cursor(5, 1)
                 brain.screen.print("                    ")
 
-        # 6) Loop timing adaptativo - con esto ahorramos bateria, antes sin esto duraba como mucho unos 4 matches, 
-        # ahora como unos 10 aunque el 9no ya el robot muestra cansancio. En fin funciona:), lo explicare en la bitacora.
+        # Loop timing adaptativo
         elapsed = now_ms() - cycle_start
         wait(max(1, LOOP_TIME_MS - elapsed), MSEC)
 
-# ------------------------------------------------
-# Punto de entrada, mando a llamar la funcion principal.
-# ------------------------------------------------
-if __name__ == "__main__":
-    main()
+# ================================================================
+# CREAR INSTANCIA DE COMPETENCIA (REQUERIDO POR FCS)
+# ================================================================
+# CRÍTICO: Esta línea registra las funciones con el Field Control System
+comp = Competition(user_control, autonomous)
+
+# ================================================================
+# INICIALIZACIÓN (SE EJECUTA AL CARGAR EL PROGRAMA)
+# ================================================================
+# Esta sección se ejecuta UNA VEZ al cargar el programa
+# NO debe contener bucles infinitos
+brain.screen.clear_screen()
+brain.screen.set_cursor(1, 1)
+brain.screen.print("Sistema Inicializado")
+brain.screen.set_cursor(2, 1)
+brain.screen.print("Esperando FCS...")
+
+# Ejecutar pre_auton automáticamente
+pre_auton()

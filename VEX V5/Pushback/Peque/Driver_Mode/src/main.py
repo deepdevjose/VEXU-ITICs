@@ -10,7 +10,7 @@
 #   dirección para proteger mecánica. Durante tap-tap rápido verás pausas.
 #
 # - Override Cooldown (80ms): Bloquea edge-trigger de toggles A/B tras
-#   soltar R1/L1 para evitar cambios accidentales. Brushes mantienen estado.
+#   soltar R2/L1 para evitar cambios accidentales. Brushes mantienen estado.
 #
 # - Slew Rate Simétrico: Misma velocidad accel/decel. Mejora futura:
 #   step_accel vs step_decel diferenciados (frenado más rápido).
@@ -55,10 +55,12 @@ LOOP_TIME_MS = 20
 # Deadzone por eje
 DEADZONE_FWD = 5
 DEADZONE_TURN = 8
+DEADZONE_STRAFE = 3  # Deadzone muy pequeño para precisión máxima en axis 1
 
 # Curva exponencial (0.0=lineal, 0.5=balanceado, 1.0=cúbico)
 EXPO_FWD = 0.5
 EXPO_TURN = 0.4
+EXPO_STRAFE = 0.6  # Mayor curva exponencial para control ultra-preciso
 
 # Slew rate (% cambio por ciclo de 20ms)
 SLEW_DRIVE = 8      # ~250ms para 0→100%
@@ -69,7 +71,7 @@ SLEW_WAY = 25       # Independiente para tuning
 # Modo de frenado drivetrain
 DRIVE_BRAKE_MODE = BrakeType.COAST
 
-# Cooldown al soltar R1/L1 (ms sin aplicar toggles)
+# Cooldown al soltar R2/L1 (ms sin aplicar toggles)
 OVERRIDE_COOLDOWN_MS = 80  # Reducido para evitar "lag" perceptible
 
 # ------------------------------------------------
@@ -131,7 +133,8 @@ ramp_extended = False
 
 # Toggles
 brush_state = BRUSH_OFF
-prev = {"R1": False, "L1": False, "A": False, "B": False, "Y": False, "Up": False, "Down": False}
+unload_mode = False  # Toggle R2 para descarga de loader
+prev = {"R2": False, "L1": False, "L2": False, "A": False, "B": False, "Y": False, "X": False}
 
 # Slew state (valores actuales tras rampa)
 slew_drive = {"L": 0, "R": 0}
@@ -149,7 +152,7 @@ last_way_cmd = {"pct": 0, "dir": "STOP"}
 cannon_last_dir = "STOP"
 way_last_dir = "STOP"
 
-# Override R1/L1
+# Override L2/L1
 override_cooldown_until = 0
 
 # Telemetría
@@ -200,23 +203,30 @@ def slew_step(current: int, target: int, step: int) -> int:
 # ================================================================
 def compute_drive_setpoints() -> tuple:
     """Calcula setpoints de drivetrain con expo, deadzone y mezcla arcade.
+    Axis 4 (izquierdo horizontal) y Axis 1 (derecho horizontal) ambos controlan giro.
+    Axis 1 tiene control ultra-preciso para ajustes finos.
     Retorna: (left_pct, right_pct)
     """
     fwd = deadband(controller.axis3.position(), DEADZONE_FWD)
     turn = deadband(controller.axis4.position(), DEADZONE_TURN)
+    strafe = deadband(controller.axis1.position(), DEADZONE_STRAFE)  # Axis 1 para giro preciso
 
     fwd = expo(fwd, EXPO_FWD)
     turn = expo(turn, EXPO_TURN)
+    strafe = expo(strafe, EXPO_STRAFE)  # Control exponencial para máxima precisión
 
-    left = clamp(fwd + turn)
-    right = clamp(fwd - turn)
+    # Combinar ambos ejes de giro (axis 4 + axis 1)
+    combined_turn = clamp(turn + strafe)
+
+    left = clamp(fwd + combined_turn)
+    right = clamp(fwd - combined_turn)
     return left, right
 
 def update_toggles():
-    """Actualiza estados de toggles (A, B, Y, Up, Down).
+    """Actualiza estados de toggles (A, B, Y, X, L2).
     Bloquea A/B durante cooldown para que override sea modo exclusivo.
     """
-    global brush_state, tumbaburros_extended, ramp_extended
+    global brush_state, tumbaburros_extended, ramp_extended, unload_mode
 
     # Bloquear A/B durante cooldown (override tiene prioridad)
     if now_ms() < override_cooldown_until:
@@ -240,36 +250,37 @@ def update_toggles():
         tumbaburros_extended = not tumbaburros_extended
     prev["Y"] = y
 
-    up = controller.buttonUp.pressing()
-    down = controller.buttonDown.pressing()
-    
-    # Mutual exclusion: ignorar si ambos presionados
-    if up and down:
-        pass  # Conflicto: no cambiar estado
-    elif up and not prev["Up"]:
-        ramp_extended = True
-    elif down and not prev["Down"]:
-        ramp_extended = False
-    
-    prev["Up"] = up
-    prev["Down"] = down
+    # Toggle X para rampa (sube/baja)
+    x = controller.buttonX.pressing()
+    if x and not prev["X"]:
+        ramp_extended = not ramp_extended
+    prev["X"] = x
+
+    # Toggle L2 para modo descarga de loader
+    l2 = controller.buttonL2.pressing()
+    if l2 and not prev["L2"]:
+        unload_mode = not unload_mode
+        # Al activar descarga, bajar tumbaburros automáticamente
+        if unload_mode:
+            tumbaburros_extended = True
+    prev["l2"] = l2
 
 def compute_mechanism_setpoints() -> tuple:
-    """Calcula setpoints de cannon/way/brushes con prioridad override > toggles.
+    """Calcula setpoints de cannon/way/brushes con prioridad override > unload_mode > toggles.
     Retorna: (brush_cmd, cannon_cmd, way_cmd)
     donde cmd = (pct, dir) con dir in ["FORWARD", "REVERSE", "STOP"]
     """
     global override_cooldown_until
 
-    r1 = controller.buttonR1.pressing()
+    r2 = controller.buttonR2.pressing()
     l1 = controller.buttonL1.pressing()
 
-    # Prioridad 1: Override R1/L1 (control directo)
-    if r1:
+    # Prioridad 1: Override R2/L1 (control directo)
+    if l1:
         override_cooldown_until = now_ms() + OVERRIDE_COOLDOWN_MS
         return (100, "REVERSE"), (100, "REVERSE"), (100, "REVERSE")
 
-    if l1:
+    if r2:
         override_cooldown_until = now_ms() + OVERRIDE_COOLDOWN_MS
         return (100, "FORWARD"), (100, "FORWARD"), (100, "FORWARD")
 
@@ -278,7 +289,11 @@ def compute_mechanism_setpoints() -> tuple:
         brush_cmd = get_toggle_brush_cmd()
         return brush_cmd, (0, "STOP"), (0, "STOP")
 
-    # Prioridad 2: Toggles A/B (solo brushes, cannon/way detenidos)
+    # Prioridad 2: Modo descarga (R2 toggle) - brushes y way en forward
+    if unload_mode:
+        return (100, "FORWARD"), (0, "STOP"), (100, "FORWARD")
+
+    # Prioridad 3: Toggles A/B (solo brushes, cannon/way detenidos)
     brush_cmd = get_toggle_brush_cmd()
     return brush_cmd, (0, "STOP"), (0, "STOP")
 
@@ -494,10 +509,11 @@ def main():
             last_telemetry_ms = t
             
             brain.screen.set_cursor(2, 1)
-            brain.screen.print("Ramp:{} Tumb:{} Brush:{}  ".format(
+            brain.screen.print("Ramp:{} Tumb:{} Brush:{} {}  ".format(
                 "UP" if ramp_extended else "DN",
                 "UP" if tumbaburros_extended else "DN",
-                ["OFF", "COL", "EJT"][brush_state]
+                ["OFF", "COL", "EJT"][brush_state],
+                "UNLOAD" if unload_mode else ""
             ))
             
             brain.screen.set_cursor(3, 1)
